@@ -3,7 +3,9 @@
 struct CameraUniform {
     view: mat4x4<f32>,
     proj: mat4x4<f32>,
+    inv_view_proj: mat4x4<f32>,
     position: vec4<f32>,
+    planes: vec4<f32>,
 }
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
@@ -13,17 +15,16 @@ struct Light {
     color: vec4<f32>,
     matrices: array<mat4x4<f32>, 6>,
 }
-@group(1) @binding(0)
+@group(0) @binding(1)
 var<uniform> light: Light;
 
-// Needs to be 16 bytes in WebGL
 struct GlobalUniforms {
+    time: f32,
     light_matrix_index: u32,
     use_shadowmaps: u32,
-    _padding1: u32,
-    _padding2: u32,
+    _padding: u32,
 }
-@group(1) @binding(1)
+@group(0) @binding(2)
 var<uniform> global_uniforms: GlobalUniforms;
 
 struct VertexInput {

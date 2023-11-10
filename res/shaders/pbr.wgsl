@@ -1,5 +1,6 @@
 #include constants.wgsl
 #include globals.wgsl
+#include light.wgsl
 #include brdf.wgsl
 
 // Vertex shader
@@ -46,55 +47,25 @@ fn vs_main(
 
 // Fragment shader
 
-@group(2)@binding(0)
+@group(1) @binding(0)
 var t_light_depth: texture_depth_2d_array;
-@group(2) @binding(1)
+@group(1) @binding(1)
 var s_light_depth: sampler_comparison;
 
-@group(3) @binding(0)
+@group(2) @binding(0)
 var t_diffuse: texture_2d<f32>;
-@group(3)@binding(1)
+@group(2) @binding(1)
 var s_diffuse: sampler;
 
-@group(3)@binding(2)
+@group(2) @binding(2)
 var t_normal: texture_2d<f32>;
-@group(3) @binding(3)
+@group(2) @binding(3)
 var s_normal: sampler;
 
-@group(3)@binding(4)
+@group(2) @binding(4)
 var t_roughness_metalness: texture_2d<f32>;
-@group(3) @binding(5)
+@group(2) @binding(5)
 var s_roughness_metalness: sampler;
-
-fn sample_direct_light(index: i32, light_coords: vec4<f32>) -> f32 {
-    if (light_coords.w <= 0.0) {
-        return 0.0;
-    }
-
-    let flip_correction = vec2<f32>(0.5, -0.5);
-    let proj_correction = 1.0 / light_coords.w;
-    let light_local = light_coords.xy * flip_correction * proj_correction + vec2<f32>(0.5, 0.5);
-    let bias = 0.000001;
-    let reference_depth = light_coords.z * proj_correction - bias;
-
-    var total_sample = 0.0;
-    for (var x: i32 = -SHADOW_SAMPLES; x < SHADOW_SAMPLES; x++) {
-        for (var y: i32 = -SHADOW_SAMPLES; y < SHADOW_SAMPLES; y++) {
-            let texelSize = vec2<f32>(textureDimensions(t_light_depth));
-            let offset = vec2<f32>(f32(x), f32(y)) / texelSize.xy;
-            let s = textureSampleCompare(
-                t_light_depth,
-                s_light_depth,
-                light_local + offset,
-                index,
-                reference_depth
-            );
-            total_sample += s * INV_SHADOW_SAMPLES;
-        }
-    }
-
-    return total_sample;
-}
 
 @fragment
 fn fs_main(vert: VertexOutput) -> @location(0) vec4<f32> {
@@ -111,39 +82,7 @@ fn fs_main(vert: VertexOutput) -> @location(0) vec4<f32> {
     
     var total_radiance: vec3<f32>;
 
-    var in_light = 0.0;
-
-    // Depth sampling is broken in WebGL...
-    // TODO: remove once WebGPU
-    if (global_uniforms.use_shadowmaps > 0u) {
-        for (var i: i32 = 0; i < 6; i++) {
-            let light_coords = light.matrices[i] * vert.world_position;
-
-            let light_dir = normalize(light_coords.xyz);
-            let bias = 0.01;
-            // z can never be smaller than this inside 90 degree frustum
-            if (light_dir.z < INV_SQRT_3 - bias) {
-                continue;
-            }
-            // x and y can never be larger than this inside frustum
-            if (abs(light_dir.y) > INV_SQRT_2 + bias) {
-                continue;
-            }
-            if (abs(light_dir.x) > INV_SQRT_2 + bias) {
-                continue;
-            }
-
-            in_light = sample_direct_light(i, light_coords);
-            // TODO should break even if 0 since we're inside frustum.
-            // See if causes issues with bias overlap between directions.
-            if (in_light > 0.0) {
-                break;
-            }
-        }
-    } else {
-        in_light = 1.0;
-    }
-
+    let in_light = sample_direct_light(vert.world_position);
     if (in_light > 0.0) {
         // lighting vecs
         let normal_dir = object_normal.xyz * 2.0 - 1.0;
@@ -159,7 +98,7 @@ fn fs_main(vert: VertexOutput) -> @location(0) vec4<f32> {
 
         // radiance
         let radiance_strength = max(dot(normal_dir, light_dir), 0.0);
-        let radiance = radiance_strength * light.color.xyz * light.color.w * light_attenuation * in_light;
+        let radiance = radiance_strength * light.color.rgb * light.color.a * light_attenuation * in_light;
 
         // brdf shading
         total_radiance += radiance * brdf(

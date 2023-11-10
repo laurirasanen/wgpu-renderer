@@ -1,81 +1,6 @@
 use std::ops::Range;
-
-use crate::core::texture::Texture;
-
-pub struct Material {
-    pub name: String,
-    pub diffuse_texture: Texture,
-    pub normal_texture: Texture,
-    pub metallic_roughness_texture: Texture,
-    pub metallic_factor: f32,  // TODO pass to shader
-    pub roughness_factor: f32, // TODO pass to shader
-    pub bind_group: wgpu::BindGroup,
-}
-
-impl Material {
-    pub fn new(
-        device: &wgpu::Device,
-        name: &str,
-        diffuse_texture: Texture,
-        normal_texture: Texture,
-        metallic_roughness_texture: Texture,
-        metallic_factor: f32,
-        roughness_factor: f32,
-        layout: &wgpu::BindGroupLayout,
-    ) -> Self {
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout,
-            entries: &[
-                // diffuse
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                },
-                // normal
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&normal_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&normal_texture.sampler),
-                },
-                // metallic roughness
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::TextureView(&metallic_roughness_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::Sampler(&metallic_roughness_texture.sampler),
-                },
-            ],
-            label: None,
-        });
-
-        Self {
-            name: String::from(name),
-            diffuse_texture,
-            normal_texture,
-            metallic_roughness_texture,
-            metallic_factor,
-            roughness_factor,
-            bind_group,
-        }
-    }
-}
-
-pub struct Mesh {
-    pub name: String,
-    pub vertex_buffer: wgpu::Buffer,
-    pub index_buffer: wgpu::Buffer,
-    pub num_elements: u32,
-    pub material: usize,
-}
+use crate::core::material::Material;
+use crate::core::mesh::Mesh;
 
 pub struct Model {
     pub meshes: Vec<Mesh>,
@@ -144,6 +69,7 @@ pub trait DrawModel<'a> {
         mesh: &'a Mesh,
         material: &'a Material,
         bind_groups: Vec<&'a wgpu::BindGroup>,
+        add_texture_binds: bool,
     );
     fn draw_mesh_instanced(
         &mut self,
@@ -151,32 +77,36 @@ pub trait DrawModel<'a> {
         material: &'a Material,
         instances: Range<u32>,
         bind_groups: Vec<&'a wgpu::BindGroup>,
+        add_texture_binds: bool,
     );
 
     fn draw_model(
         &mut self,
         model: &'a Model,
         bind_groups: Vec<&'a wgpu::BindGroup>,
+        add_texture_binds: bool,
     );
     fn draw_model_instanced(
         &mut self,
         model: &'a Model,
         instances: Range<u32>,
         bind_groups: Vec<&'a wgpu::BindGroup>,
+        add_texture_binds: bool,
     );
 }
 
 impl<'a, 'b> DrawModel<'b> for wgpu::RenderPass<'a>
-where
-    'b: 'a,
+    where
+        'b: 'a,
 {
     fn draw_mesh(
         &mut self,
         mesh: &'b Mesh,
         material: &'b Material,
         bind_groups: Vec<&'a wgpu::BindGroup>,
+        add_texture_binds: bool,
     ) {
-        self.draw_mesh_instanced(mesh, material, 0..1, bind_groups);
+        self.draw_mesh_instanced(mesh, material, 0..1, bind_groups, add_texture_binds);
     }
 
     fn draw_mesh_instanced(
@@ -185,13 +115,16 @@ where
         material: &'b Material,
         instances: Range<u32>,
         bind_groups: Vec<&'a wgpu::BindGroup>,
+        add_texture_binds: bool,
     ) {
         self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
         self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        for i in 0..bind_groups.len() {
-            self.set_bind_group(i as u32, bind_groups[i], &[]);
+        for (i, group) in bind_groups.iter().enumerate() {
+            self.set_bind_group(i as u32, group, &[]);
         }
-        self.set_bind_group(bind_groups.len() as u32, &material.bind_group, &[]);
+        if add_texture_binds {
+            self.set_bind_group(bind_groups.len() as u32, &material.bind_group, &[]);
+        }
         self.draw_indexed(0..mesh.num_elements, 0, instances);
     }
 
@@ -199,8 +132,9 @@ where
         &mut self,
         model: &'b Model,
         bind_groups: Vec<&'a wgpu::BindGroup>,
+        add_texture_binds: bool,
     ) {
-        self.draw_model_instanced(model, 0..1, bind_groups);
+        self.draw_model_instanced(model, 0..1, bind_groups, add_texture_binds);
     }
 
     fn draw_model_instanced(
@@ -208,6 +142,7 @@ where
         model: &'b Model,
         instances: Range<u32>,
         bind_groups: Vec<&'a wgpu::BindGroup>,
+        add_texture_binds: bool,
     ) {
         for mesh in &model.meshes {
             let material = &model.materials[mesh.material];
@@ -216,6 +151,7 @@ where
                 material,
                 instances.clone(),
                 bind_groups.clone(),
+                add_texture_binds,
             );
         }
     }
